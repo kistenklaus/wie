@@ -8,9 +8,11 @@ set(TEST_NAME ${PROJECT_NAME}-test)
 enable_testing()
 
 add_executable(${TEST_NAME} 
+  counting_allocator.cpp
   pool.cpp
   rc.cpp
-  counting_allocator.cpp
+  singly_linked_list.cpp
+  vec.cpp
 )
 
 target_link_libraries(${TEST_NAME} GTest::gtest_main)

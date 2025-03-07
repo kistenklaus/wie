@@ -6,23 +6,19 @@
 
 namespace wie {
 
-template<typename T = void>
-struct PageAllocator {
+template <typename T = void> struct PageAllocator {
 public:
-  template<typename U>
-  struct rebind {
+  template <typename U> struct rebind {
     using other = PageAllocator<U>;
   };
   using value_type = T;
 
-  T* allocate(size_t n) {
-    return aligned_alloc(sysconf(_SC_PAGESIZE), n);
+  T *allocate(size_t n) {
+    return reinterpret_cast<T *>(aligned_alloc(sysconf(_SC_PAGESIZE), n));
   }
 
-  void deallocate(value_type* p, size_t n){
-    free(p);
-  }
-  
+  void deallocate(value_type *p, size_t n) { free(p); }
+
 private:
 };
 

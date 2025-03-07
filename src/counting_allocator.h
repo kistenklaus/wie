@@ -1,7 +1,6 @@
 #pragma once
 #include "rc.h"
 #include <cstddef>
-#include <iostream>
 #include <memory>
 
 namespace wie {
@@ -21,6 +20,10 @@ template <typename Allocator = std::allocator<void>> struct CountingAllocator {
   using value_type = typename alloc_traits::value_type;
   using pointer = typename alloc_traits::pointer;
   using size_type = typename alloc_traits::size_type;
+
+  using propagate_on_container_copy_assignment = std::true_type;
+  using propagate_on_container_move_assignment = std::true_type;
+  using is_always_equals = std::false_type;
 
   CountingAllocator()
       : m_parentAllocator{},

@@ -15,3 +15,4 @@ TEST(Rc, BasicAssertions) {
   ASSERT_EQ(*x, *z);
   ASSERT_EQ(*x, *w);
 }
+
