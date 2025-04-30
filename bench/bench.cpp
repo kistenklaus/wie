@@ -1,6 +1,5 @@
 
 #include <benchmark/benchmark.h>
-
-#include "alloc.h"
+#include "./pool_alloc.h"
 
 BENCHMARK_MAIN();

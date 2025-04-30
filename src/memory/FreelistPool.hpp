@@ -1,10 +1,11 @@
 #pragma once
+#include <cassert>
 #include <cstddef>
 #include <algorithm>
 #include <memory>
 #include <vector>
 
-namespace wie {
+namespace strobe::memory {
 
 namespace internal {
 
@@ -65,6 +66,7 @@ public:
   }
 
   void deallocate(void *p) {
+    assert(p != nullptr);
     Block *b = reinterpret_cast<Block *>(p);
     b->next = m_freeList;
     m_freeList = b;

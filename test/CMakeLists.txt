@@ -8,11 +8,12 @@ set(TEST_NAME ${PROJECT_NAME}-test)
 enable_testing()
 
 add_executable(${TEST_NAME} 
-  counting_allocator.cpp
-  pool.cpp
-  rc.cpp
-  singly_linked_list.cpp
-  vec.cpp
+  mallocator.cpp
+  page_allocator.cpp
+  flexible_bitset.cpp
+  poly_allocator.cpp
+  # tail_allocator.cpp
+  buddy_allocator.cpp
 )
 
 target_link_libraries(${TEST_NAME} GTest::gtest_main)
