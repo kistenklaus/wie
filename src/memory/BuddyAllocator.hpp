@@ -2,10 +2,13 @@
 
 #include "memory/AllocatorTraits.hpp"
 #include "memory/PageAllocator.hpp"
+#include <array>
 #include <bit>
 #include <bitset>
 #include <cassert>
 #include <print>
+#include <stdexcept>
+#include <vector>
 
 namespace strobe {
 
@@ -42,7 +45,7 @@ public:
   BuddyResource(BuddyResource &&o)
       : m_buffer(o.m_buffer), m_bitset(o.m_bitset) {
     o.m_buffer = nullptr;
-    o.m_bitset.reset();
+    o.m_bitset.clear();
   }
 
   BuddyResource &operator=(BuddyResource &&o) {
@@ -56,49 +59,51 @@ public:
     m_buffer = o.m_buffer;
     m_bitset = o.m_bitset;
     o.m_buffer = nullptr;
-    o.m_bitset.reset();
+    o.m_bitset.clear();
     return *this;
   }
 
-  void *allocate(std::size_t size, std::size_t align) {
+  void *allocate(std::size_t size, std::size_t) {
+    size = std::bit_ceil(size);
     if (size == 0 || size > Capacity)
       return nullptr;
     std::size_t blockCount = (size + BlockSize - 1) >> LogBlockSize;
-    std::size_t targetOrder = std::bit_width(blockCount - 1);
-    std::size_t current = 0;
-    std::size_t currentOrder = LogBlockCount;
-    return allocateInternal(targetOrder, current, currentOrder);
+    std::size_t targetOrder = LogBlockCount - std::bit_width(blockCount - 1);
+    return allocateInternal(targetOrder);
   }
 
   void deallocate(void *ptr, std::size_t size, std::size_t) {
     if (ptr == nullptr) {
       return;
     }
+    size = std::bit_ceil(size);
+    if (size == 0 || size > Capacity) {
+      throw std::runtime_error("Invalid arguments to deallocate");
+    }
+    std::size_t log2Size = std::bit_width(size - 1);
+    std::size_t logBlockCount = log2Size - LogBlockSize;
     assert(owns(ptr));
     std::size_t offset = reinterpret_cast<std::byte *>(ptr) - m_buffer;
-    std::size_t blockCount = (size + BlockSize - 1) >> LogBlockSize;
-    std::size_t order = std::bit_width(blockCount - 1); //
-    std::size_t invOrder = LogBlockCount - order;
-    std::size_t orderNodeOffset = (1 << invOrder) - 1;
-    std::size_t blockIdx = offset >> LogBlockSize;
-    assert((offset % (BlockSize << order)) == 0);
-    std::size_t nodeOffset = (blockIdx >> order) + orderNodeOffset;
-    assert(nodeOffset < BlockCount * 2 - 1);
-    /* assert(m_bitset.test(nodeOffset)); */
-    m_bitset.reset(nodeOffset);
-    order += 1;
-    std::size_t current = (nodeOffset - 1) >> 1;
-    while (order < LogBlockCount) {
-      std::size_t left = current * 2 + 1;
-      std::size_t right = left + 1;
-      assert(left < BlockCount * 2 - 1);
-      assert(right < BlockCount * 2 - 1);
-      if (!m_bitset[left] || !m_bitset[right]) {
-        m_bitset.reset(current);
+    std::size_t blockOffset = offset / size;
+    std::size_t order = LogBlockCount - logBlockCount;
+    std::size_t block = blockOffset + ((1 << order) - 1);
+    assert(m_bitset[block]);
+    while (block != 0) {
+      m_bitset[block] = false;
+      std::size_t buddy;
+      if (block & 0x1) { // is left child
+        buddy = block + 1;
+      } else {
+        buddy = block - 1;
       }
-      current = (current - 1) >> 1;
-      order += 1;
+      if (m_bitset[buddy] == false) {
+        block = (block - 1) / 2;
+        continue;
+      }
+      return;
     }
+    assert(block == 0);
+    m_bitset[0] = false;
   }
 
   bool owns(const void *p) const {
@@ -107,56 +112,71 @@ public:
   }
 
 private:
-  void *allocateInternal(std::size_t targetOrder, std::size_t current,
-                         std::size_t currentOrder) {
-    if (m_bitset[current]) {
+
+  std::size_t searchForBlock(std::size_t targetOrder) {
+  }
+
+  void *allocateInternal(std::size_t targetOrder) {
+    std::size_t block = searchForBlock(targetOrder);
+    std::array<std::size_t, 2 * LogBlockCount> stack;
+    stack[0] = 0;
+    std::size_t stackSize = 1;
+    while (stackSize > 0) {
+      // pop current from stack
+      std::size_t current = stack[--stackSize];
+      std::size_t order = std::bit_width(current + 1) - 1;
+      // std::println("current = {}, order = {} target={}", current, order,
+      // targetOrder);
+
+      if (order == targetOrder) {
+        if (m_bitset[current]) {
+          continue;
+        } else {
+          stack[stackSize++] = current;
+          break;
+        }
+      }
+
+      std::size_t left = 2 * current + 1;
+      std::size_t right = left + 1;
+
+      if (m_bitset[current] && !m_bitset[left] && !m_bitset[right]) {
+        continue;
+      }
+      // std::println("left = {}, right = {}", left, right);
+
+      stack[stackSize++] = right;
+      stack[stackSize++] = left;
+    }
+    if (stackSize == 0) {
+      // no block was found
       return nullptr;
-    } else {
-      if (targetOrder == currentOrder || currentOrder == 0) {
-        // Actually allocate a block!
-        std::size_t invCurrentOrder = LogBlockCount - currentOrder;
-        std::size_t nodeCount = 1 << invCurrentOrder;
-        std::size_t nodeOffset = nodeCount - 1;
-        std::size_t blockIdx = current - nodeOffset;
+    }
+    std::size_t block = stack[stackSize - 1];
+    assert(m_bitset[block] == false);
+    assert(std::bit_width(block + 1) - 1 == targetOrder);
+    std::size_t order = targetOrder;
+    std::size_t offset =
+        (block - ((1 << order) - 1)) * (BlockSize << (LogBlockCount - order));
+    // std::println("offset = {}", offset);
 
-        std::size_t blockSize = BlockSize << currentOrder;
-
-        m_bitset.set(current);
-
-        return m_buffer + blockSize * blockIdx;
+    m_bitset[block] = true;
+    void *ptr = m_buffer + offset;
+    block = (block - 1) / 2;
+    while (block < m_bitset.size()) {
+      if (m_bitset[block]) {
+        break;
       } else {
-
-        // try to allocate from children
-        std::size_t left = current * 2 + 1;
-        std::size_t right = left + 1;
-        { // try to allocate from left child
-          void *p = allocateInternal(targetOrder, left, currentOrder - 1);
-          if (p != nullptr) {
-            if (m_bitset[left] && m_bitset[right]) {
-              // merge buddies
-              m_bitset.set(current);
-            }
-            return p;
-          }
-        }
-        { // try to allocate from right child
-          void *p = allocateInternal(targetOrder, right, currentOrder - 1);
-          if (p != nullptr) {
-            if (m_bitset[left] && m_bitset[right]) {
-              // merge buddies
-              m_bitset.set(current);
-            }
-            return p;
-          }
-        }
-        return nullptr;
+        m_bitset[block] = true;
+        block = (block - 1) / 2;
       }
     }
+    return ptr;
   }
 
   [[no_unique_address]] UpstreamAllocator m_upstream;
 
-  std::bitset<BlockCount * 2ull - 1ull> m_bitset;
+  std::bitset<BlockCount * 2> m_bitset;
   std::byte *m_buffer;
 };
 

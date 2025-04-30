@@ -16,6 +16,8 @@ add_executable(${TEST_NAME}
   buddy_allocator.cpp
 )
 
+target_compile_options(${TEST_NAME} PRIVATE -g -O0)
+
 target_link_libraries(${TEST_NAME} GTest::gtest_main)
 target_link_libraries(${TEST_NAME} ${PROJECT_NAME})
 

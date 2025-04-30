@@ -9,16 +9,12 @@ project(wie CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 23)
 
-
-SET(BUILD_MODE Debug)
-SET(CMAKE_CXX_FLAGS "-Wall")
-SET(CMAKE_CXX_FLAGS_DEBUG "-g")
-SET(CMAKE_CXX_FLAGS_RELEASE "-O3")
-
 add_library(${PROJECT_NAME} 
   src/memory/PageAllocator.cpp
   src/memory/pages.cpp
 )
+
+set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
 
 
 target_compile_options(${PROJECT_NAME} PRIVATE -O3 PUBLIC -std=c++23)
