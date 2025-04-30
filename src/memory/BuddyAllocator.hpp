@@ -27,6 +27,11 @@ private:
   static constexpr std::size_t LogBlockCount = LogCapacity - LogBlockSize;
   static constexpr std::size_t BlockCount = 1ull << LogBlockCount;
 
+  struct FreelistNode {
+    struct FreelistNode* next;
+    struct FreelistNode* prev;
+  };
+
 public:
   BuddyResource(UpstreamAllocator upstream = {})
       : m_upstream(std::move(upstream)) {
@@ -112,12 +117,8 @@ public:
   }
 
 private:
-
   std::size_t searchForBlock(std::size_t targetOrder) {
-  }
 
-  void *allocateInternal(std::size_t targetOrder) {
-    std::size_t block = searchForBlock(targetOrder);
     std::array<std::size_t, 2 * LogBlockCount> stack;
     stack[0] = 0;
     std::size_t stackSize = 1;
@@ -150,18 +151,13 @@ private:
     }
     if (stackSize == 0) {
       // no block was found
-      return nullptr;
+      return -1;
     }
-    std::size_t block = stack[stackSize - 1];
-    assert(m_bitset[block] == false);
-    assert(std::bit_width(block + 1) - 1 == targetOrder);
-    std::size_t order = targetOrder;
-    std::size_t offset =
-        (block - ((1 << order) - 1)) * (BlockSize << (LogBlockCount - order));
-    // std::println("offset = {}", offset);
+    return stack[stackSize - 1];
+  }
 
+  void mergeBuddiesUp(std::size_t block) {
     m_bitset[block] = true;
-    void *ptr = m_buffer + offset;
     block = (block - 1) / 2;
     while (block < m_bitset.size()) {
       if (m_bitset[block]) {
@@ -171,6 +167,20 @@ private:
         block = (block - 1) / 2;
       }
     }
+  }
+
+  void *allocateInternal(std::size_t targetOrder) {
+    std::size_t block = searchForBlock(targetOrder);
+    if (block == -1) {
+      return nullptr;
+    }
+    assert(m_bitset[block] == false);
+    assert(std::bit_width(block + 1) - 1 == targetOrder);
+    std::size_t order = targetOrder;
+    std::size_t offset =
+        (block - ((1 << order) - 1)) * (BlockSize << (LogBlockCount - order));
+    void *ptr = m_buffer + offset;
+    mergeBuddiesUp(block);
     return ptr;
   }
 
@@ -178,6 +188,8 @@ private:
 
   std::bitset<BlockCount * 2> m_bitset;
   std::byte *m_buffer;
+  std::array<FreelistNode, BlockCount / 2> m_freelistStorage;
+  std::array<FreelistNode*, LogBlockCount> m_freelists;
 };
 
 } // namespace strobe

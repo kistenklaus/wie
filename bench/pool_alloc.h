@@ -1,5 +1,6 @@
 #include "memory/BuddyAllocator.hpp"
 #include "memory/Mallocator.hpp"
+#include "memory/PageAllocator.hpp"
 #include <algorithm>
 #include <benchmark/benchmark.h>
 #include <cstddef>
@@ -75,9 +76,18 @@ BENCHMARK_CAPTURE(BM_pool_random_order<Buddy1024>, buddy, Buddy1024{})
   ->Args({1024, 1 << 10});
 
 using Buddy4096 = strobe::BuddyResource<(1ull << 10) * 4096, 4096>;
-BENCHMARK_CAPTURE(BM_pool_random_order<Buddy1024>, buddy, Buddy1024{})
-  ->Args({1024, 1 << 10});
+BENCHMARK_CAPTURE(BM_pool_random_order<Buddy4096>, buddy, Buddy4096{})
+  ->Args({4096, 1 << 10});
 
 using Buddy8192 = strobe::BuddyResource<(1ull << 10) * 8192, 8192>;
 BENCHMARK_CAPTURE(BM_pool_random_order<Buddy8192>, buddy, Buddy8192{})
   ->Args({8192, 1 << 10});
+
+
+BENCHMARK_CAPTURE(BM_pool_random_order<strobe::PageAllocator>, mmap,
+                  strobe::PageAllocator{})
+  ->Args({4096, 1 << 10})
+  ->Args({8192, 1 << 10});
+
+
+auto x = sizeof(Buddy16);
