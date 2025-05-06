@@ -66,7 +66,9 @@ struct AllocatorTraits {
 
   static std::pair<void*, std::size_t> allocate_at_least(...);
   static void* reallocate(...);
-  static bool owns(...);
+  static bool owns(A& a, void* ptr) requires OwningAllocator<A> {
+    return a.owns(ptr);
+  }
 };
 
 }  // namespace strobe

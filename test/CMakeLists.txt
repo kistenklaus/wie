@@ -10,9 +10,7 @@ enable_testing()
 add_executable(${TEST_NAME} 
   mallocator.cpp
   page_allocator.cpp
-  flexible_bitset.cpp
   poly_allocator.cpp
-  # tail_allocator.cpp
   buddy_allocator.cpp
 )
 

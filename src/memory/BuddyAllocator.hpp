@@ -6,16 +6,14 @@
 #include <bit>
 #include <bitset>
 #include <cassert>
-#include <print>
+#include <cstddef>
 #include <stdexcept>
-#include <vector>
 
 namespace strobe {
 
 template <std::size_t Capacity, std::size_t BlockSize,
           typename UpstreamAllocator = PageAllocator>
-class BuddyResource {
-private:
+class BuddyAllocator {
   using UpstreamTraits = AllocatorTraits<UpstreamAllocator>;
   static_assert(std::has_single_bit(Capacity));
   static_assert(std::has_single_bit(BlockSize));
@@ -28,168 +26,249 @@ private:
   static constexpr std::size_t BlockCount = 1ull << LogBlockCount;
 
   struct FreelistNode {
-    struct FreelistNode* next;
-    struct FreelistNode* prev;
+    FreelistNode *next;
+    FreelistNode *prev;
   };
 
 public:
-  BuddyResource(UpstreamAllocator upstream = {})
+  explicit BuddyAllocator(UpstreamAllocator upstream = {})
       : m_upstream(std::move(upstream)) {
     m_buffer = reinterpret_cast<std::byte *>(UpstreamTraits::allocate(
         m_upstream, Capacity, alignof(std::max_align_t)));
+    for (FreelistNode &node : m_freelistStorage) {
+      node.next = nullptr;
+      node.prev = nullptr;
+    }
+    for (FreelistNode *&ptr : m_freelists) {
+      ptr = nullptr;
+    }
+    pushFreelist(0, &getFreelistNode(0, 0));
   }
-  ~BuddyResource() {
+  ~BuddyAllocator() {
     if (m_buffer != nullptr) {
       UpstreamTraits::deallocate(m_upstream, m_buffer, Capacity,
                                  alignof(std::max_align_t));
       m_buffer = nullptr;
     }
   }
-  BuddyResource(const BuddyResource &) = delete;
-  BuddyResource &operator=(const BuddyResource &) = delete;
-  BuddyResource(BuddyResource &&o)
-      : m_buffer(o.m_buffer), m_bitset(o.m_bitset) {
-    o.m_buffer = nullptr;
-    o.m_bitset.clear();
-  }
+  BuddyAllocator(const BuddyAllocator &) = delete;
+  BuddyAllocator &operator=(const BuddyAllocator &) = delete;
+  BuddyAllocator(BuddyAllocator &&o) = delete;
 
-  BuddyResource &operator=(BuddyResource &&o) {
-    if (this == &o) {
-      return *this;
-    }
-    if (m_buffer != nullptr) {
-      UpstreamTraits::deallocate(m_upstream, m_buffer, Capacity,
-                                 alignof(std::max_align_t));
-    }
-    m_buffer = o.m_buffer;
-    m_bitset = o.m_bitset;
-    o.m_buffer = nullptr;
-    o.m_bitset.clear();
-    return *this;
-  }
+  BuddyAllocator &operator=(BuddyAllocator &&o) = delete;
 
-  void *allocate(std::size_t size, std::size_t) {
-    size = std::bit_ceil(size);
-    if (size == 0 || size > Capacity)
-      return nullptr;
-    std::size_t blockCount = (size + BlockSize - 1) >> LogBlockSize;
-    std::size_t targetOrder = LogBlockCount - std::bit_width(blockCount - 1);
-    return allocateInternal(targetOrder);
-  }
-
-  void deallocate(void *ptr, std::size_t size, std::size_t) {
-    if (ptr == nullptr) {
-      return;
-    }
-    size = std::bit_ceil(size);
-    if (size == 0 || size > Capacity) {
-      throw std::runtime_error("Invalid arguments to deallocate");
-    }
-    std::size_t log2Size = std::bit_width(size - 1);
-    std::size_t logBlockCount = log2Size - LogBlockSize;
-    assert(owns(ptr));
-    std::size_t offset = reinterpret_cast<std::byte *>(ptr) - m_buffer;
-    std::size_t blockOffset = offset / size;
-    std::size_t order = LogBlockCount - logBlockCount;
-    std::size_t block = blockOffset + ((1 << order) - 1);
-    assert(m_bitset[block]);
-    while (block != 0) {
-      m_bitset[block] = false;
-      std::size_t buddy;
-      if (block & 0x1) { // is left child
-        buddy = block + 1;
-      } else {
-        buddy = block - 1;
-      }
-      if (m_bitset[buddy] == false) {
-        block = (block - 1) / 2;
-        continue;
-      }
-      return;
-    }
-    assert(block == 0);
-    m_bitset[0] = false;
-  }
 
   bool owns(const void *p) const {
-    const std::byte *raw = reinterpret_cast<const std::byte *>(p);
+    const auto *raw = static_cast<const std::byte *>(p);
     return raw >= m_buffer && raw < m_buffer + Capacity;
   }
 
-private:
-  std::size_t searchForBlock(std::size_t targetOrder) {
-
-    std::array<std::size_t, 2 * LogBlockCount> stack;
-    stack[0] = 0;
-    std::size_t stackSize = 1;
-    while (stackSize > 0) {
-      // pop current from stack
-      std::size_t current = stack[--stackSize];
-      std::size_t order = std::bit_width(current + 1) - 1;
-      // std::println("current = {}, order = {} target={}", current, order,
-      // targetOrder);
-
-      if (order == targetOrder) {
-        if (m_bitset[current]) {
-          continue;
-        } else {
-          stack[stackSize++] = current;
-          break;
-        }
-      }
-
-      std::size_t left = 2 * current + 1;
-      std::size_t right = left + 1;
-
-      if (m_bitset[current] && !m_bitset[left] && !m_bitset[right]) {
-        continue;
-      }
-      // std::println("left = {}, right = {}", left, right);
-
-      stack[stackSize++] = right;
-      stack[stackSize++] = left;
-    }
-    if (stackSize == 0) {
-      // no block was found
-      return -1;
-    }
-    return stack[stackSize - 1];
-  }
-
-  void mergeBuddiesUp(std::size_t block) {
-    m_bitset[block] = true;
-    block = (block - 1) / 2;
-    while (block < m_bitset.size()) {
-      if (m_bitset[block]) {
-        break;
-      } else {
-        m_bitset[block] = true;
-        block = (block - 1) / 2;
-      }
-    }
-  }
-
-  void *allocateInternal(std::size_t targetOrder) {
-    std::size_t block = searchForBlock(targetOrder);
-    if (block == -1) {
+  void *allocate(std::size_t size, std::size_t alignment) {
+    assert(alignment <= size && std::has_single_bit(alignment));
+    size = std::bit_ceil(size);
+    if (size == 0 || size > Capacity) {
       return nullptr;
     }
-    assert(m_bitset[block] == false);
-    assert(std::bit_width(block + 1) - 1 == targetOrder);
-    std::size_t order = targetOrder;
-    std::size_t offset =
-        (block - ((1 << order) - 1)) * (BlockSize << (LogBlockCount - order));
-    void *ptr = m_buffer + offset;
-    mergeBuddiesUp(block);
+    const std::size_t block = size >> LogBlockSize;
+    const int log2Block = floorLog2(block);
+    const int order = LogBlockCount - log2Block;
+    void *ptr = allocateFromFreelist(order);
     return ptr;
   }
 
-  [[no_unique_address]] UpstreamAllocator m_upstream;
+  void deallocate(void *ptr, std::size_t size, std::size_t) {
+    size = std::bit_ceil(size);
+    if (size == 0 || size > Capacity) {
+      throw std::runtime_error("Invalid size for deallocate");
+    }
+    const std::size_t block = size >> LogBlockSize;
+    const int log2Block = floorLog2(block);
+    const int order = LogBlockCount - log2Block;
+    deallocateToFreelist(ptr, order);
+  }
+
+private:
+  static constexpr int floorLog2(const std::size_t n) { return std::bit_width(n) - 1; }
+
+  static std::size_t indexOffsetOfOrder(const int order) {
+    return (1 << static_cast<std::size_t>(order)) - 1;
+  }
+  static std::size_t rankOfNodeIndex(const std::size_t nodeIndex, const int order) {
+    const std::size_t offset = indexOffsetOfOrder(order);
+    return nodeIndex - offset;
+  }
+  static std::size_t leftChild(const std::size_t index) { return 2 * index + 1; }
+  static std::size_t leftChildN(const std::size_t index, const std::size_t n) {
+    return ((index + 1) << n) - 1;
+  }
+  static std::size_t rightChild(const std::size_t index) { return 2 * index + 2; }
+  static std::size_t parentOfIndex(const std::size_t index) {
+    return (index - 1) / 2;
+  }
+
+  FreelistNode &getFreelistNode(const std::size_t index, const int order) {
+    if (order == LogBlockCount) {
+      const std::size_t orderOffset = (1 << order) - 1;
+      assert(orderOffset <= index);
+      const std::size_t block = index - orderOffset;
+      return m_freelistStorage[block / 2];
+    }
+    const std::size_t rank = rankOfNodeIndex(index, order);
+    std::size_t idx = rank << (LogBlockCount - order - 1);
+    return m_freelistStorage[idx];
+  }
+
+  FreelistNode *popFreelist(int order) {
+    FreelistNode *head = m_freelists[order];
+    if (head == nullptr) {
+      return nullptr;
+    }
+    FreelistNode *next = head->next;
+    m_freelists[order] = next;
+    if (next != nullptr) {
+      next->prev = nullptr;
+    }
+    // TODO might not be needed
+    head->next = nullptr;
+    head->prev = nullptr;
+    return head;
+  }
+
+  void eraseNodeFromFreelist(FreelistNode* node, int order) {
+    if (node->prev == nullptr) {
+      m_freelists[order] = nullptr;
+    } else {
+      FreelistNode* prev = node->prev;
+      prev->next = node->next;
+      // TODO Maybe we don't have to cleanup non used nodes.
+      node->next = nullptr;
+      node->prev = nullptr;
+    }
+  }
+
+  static FreelistNode *rightChildOfFreelistNode(FreelistNode *node,
+                                         const int order) {
+    if (order == LogBlockCount - 1) {
+      return node;
+    }
+    assert(order != LogBlockCount - 1);
+    const std::size_t shift = LogBlockCount - order - 2;
+    return node + (1 << shift);
+  }
+
+  std::size_t freelistPtrToIndex(FreelistNode *node, const int order) {
+    if (order == LogBlockCount) {
+      // NOTE: Requires bitset because freelist pointers only give us half
+      // resolution!
+      const std::size_t location = (node - m_freelistStorage.data());
+      const std::size_t left = location * 2;
+      const std::size_t offset = indexOffsetOfOrder(order);
+      std::size_t leftIndex = offset + left;
+      if (m_bitset[leftIndex]) {
+        return leftIndex + 1;
+      }
+      if (m_bitset[leftIndex + 1]) {
+        return leftIndex;
+      }
+    }
+    const std::size_t location = (node - m_freelistStorage.data());
+    const std::size_t shift = LogBlockCount - order - 1;
+    const std::size_t idx = location >> shift;
+    const std::size_t offset = indexOffsetOfOrder(order);
+    return offset + idx;
+  }
+
+  std::size_t ptrToIndex(void *ptr, const int order) const {
+    const auto *raw = static_cast<std::byte *>(ptr);
+    const std::ptrdiff_t diff = raw - m_buffer;
+    const std::size_t block = diff >> LogBlockSize;
+    const std::size_t rank = block >> (LogBlockCount - order);
+    const std::size_t offset = indexOffsetOfOrder(order);
+    return offset + rank;
+  }
+
+  static constexpr std::size_t buddyOfIndex(const std::size_t index) {
+    assert(index != 0);
+    if (index & 0x1) { // is left child.
+      return index + 1;
+    }
+    // is right child.
+    return index - 1;
+  }
+
+  void pushFreelist(const int order, FreelistNode *node) {
+    assert(node != nullptr);
+    FreelistNode *head = m_freelists[order];
+    m_freelists[order] = node;
+    if (head != nullptr) {
+      head->prev = node;
+    }
+    node->next = head;
+    node->prev = nullptr;
+  }
+
+  void *allocateFromFreelist(const int order) {
+    FreelistNode *node = nullptr;
+    int o = order;
+    while (o >= 0) {
+      node = popFreelist(o);
+      if (node == nullptr) {
+        --o;
+      } else {
+        break;
+      }
+    }
+    if (node == nullptr) {
+      return nullptr;
+    }
+
+    // Break up blocks
+    std::size_t index = freelistPtrToIndex(node, o);
+    const std::size_t rank = rankOfNodeIndex(index, o);
+    const std::size_t ptrOffset = (rank << (LogBlockCount - o)) << LogBlockSize;
+    m_bitset.set(index);
+    while (o != order) {
+      index = index * 2 + 1;
+      m_bitset.set(index);
+      FreelistNode *right = rightChildOfFreelistNode(node, o);
+      //assert(right >= &m_freelistStorage.front());
+      //assert(right < &m_freelistStorage.back());
+      ++o;
+      pushFreelist(o, right);
+    }
+    return m_buffer + ptrOffset;
+  }
+
+  void deallocateToFreelist(void *ptr, const int order) {
+    std::size_t index = ptrToIndex(ptr, order);
+    //assert(m_bitset[index] == true);
+
+    std::size_t o = order;
+    while (index != 0) {
+      m_bitset.reset(index);
+      std::size_t buddy = buddyOfIndex(index);
+      if (m_bitset[buddy]) {
+        break;
+      }
+      // NOTE: Coalesce buddies
+      FreelistNode& node = getFreelistNode(buddy, o);
+      eraseNodeFromFreelist(&node, o);
+      index = parentOfIndex(index);
+      --o;
+    }
+    if (index == 0) {
+      m_bitset.reset(0);
+    }
+    FreelistNode& node = getFreelistNode(index, o);
+    pushFreelist(o, &node);
+  }
+
+  UpstreamAllocator m_upstream;
 
   std::bitset<BlockCount * 2> m_bitset;
   std::byte *m_buffer;
   std::array<FreelistNode, BlockCount / 2> m_freelistStorage;
-  std::array<FreelistNode*, LogBlockCount> m_freelists;
+  std::array<FreelistNode *, LogBlockCount + 1> m_freelists;
 };
 
 } // namespace strobe

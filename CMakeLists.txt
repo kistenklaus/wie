@@ -14,7 +14,7 @@ add_library(${PROJECT_NAME}
   src/memory/pages.cpp
 )
 
-set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
+# set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
 
 
 target_compile_options(${PROJECT_NAME} PRIVATE -O3 PUBLIC -std=c++23)

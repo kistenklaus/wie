@@ -3,14 +3,13 @@
 #include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
-#include <print>
 #include <random>
 
 using namespace strobe;
 
 TEST(BuddyAllocator, simple_pool_allocations) {
   static constexpr std::size_t COUNT = 32;
-  strobe::BuddyResource<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
+  strobe::BuddyAllocator<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
       resource;
 
   std::vector<std::uint32_t *> allocations(COUNT);
@@ -32,10 +31,10 @@ TEST(BuddyAllocator, simple_pool_allocations) {
 }
 
 TEST(BuddyAllocator, simple_allocations) {
-  static constexpr std::size_t Capacity = 128;
-  strobe::BuddyResource<Capacity, sizeof(std::uint32_t)> resource;
+  static constexpr std::size_t Capacity = 256;
+  strobe::BuddyAllocator<Capacity, sizeof(std::uint32_t)> resource;
 
-  std::vector<std::size_t> sizes = {32, 16, 4, 8, 64};
+  std::vector<std::size_t> sizes = {32, 16, 4, 8, 64, 8, 8, 16};
   std::vector<std::uint32_t *> pointers(sizes.size());
 
   for (std::size_t i = 0; i < sizes.size(); ++i) {
@@ -55,7 +54,7 @@ TEST(BuddyAllocator, simple_allocations) {
 
 TEST(BuddyAllocator, overallocation) {
   static constexpr std::size_t COUNT = 32;
-  strobe::BuddyResource<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
+  strobe::BuddyAllocator<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
       resource;
 
   std::vector<std::uint32_t *> allocations(COUNT);
@@ -81,7 +80,7 @@ TEST(BuddyAllocator, overallocation) {
 
 TEST(BuddyAllocator, simple_pool_alloc_and_dealloc) {
   static constexpr std::size_t COUNT = 32;
-  strobe::BuddyResource<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
+  strobe::BuddyAllocator<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
       resource;
 
   std::vector<std::uint32_t *> allocations(COUNT);
@@ -109,7 +108,7 @@ TEST(BuddyAllocator, simple_pool_alloc_and_dealloc) {
 
 TEST(BuddyAllocator, realloc_returns_same_address) {
   static constexpr std::size_t COUNT = 32;
-  strobe::BuddyResource<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
+  strobe::BuddyAllocator<sizeof(std::uint32_t) * COUNT, sizeof(std::uint32_t)>
       resource;
 
   void *a1 = resource.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
@@ -122,7 +121,7 @@ TEST(BuddyAllocator, realloc_returns_same_address) {
 
 TEST(BuddyAllocator, simple_alloc_dealloc) {
 
-  strobe::BuddyResource<32 * 4, 4> resource;
+  strobe::BuddyAllocator<32 * 4, 4> resource;
 
   std::vector<std::size_t> sizes = {4, 8, 16, 32};
   std::vector<void *> pointers(sizes.size());
@@ -151,7 +150,7 @@ TEST(BuddyAllocator, simple_alloc_dealloc) {
 
 TEST(BuddyAllocator, random_alloc_dealloc) {
   constexpr std::size_t Capacity = 1ull << 20;
-  strobe::BuddyResource<Capacity, sizeof(std::uint32_t)> resource;
+  strobe::BuddyAllocator<Capacity, sizeof(std::uint32_t)> resource;
 
   std::array allocationSizeOptions = {
       sizeof(std::uint32_t),      sizeof(std::uint32_t) * 2,
@@ -184,11 +183,13 @@ TEST(BuddyAllocator, random_alloc_dealloc) {
         allocations[idx] =
             resource.allocate(allocationSize[idx], alignof(std::uint32_t));
         *reinterpret_cast<std::uint32_t *>(allocations[idx]) = idx;
-        //std::println("alloc {}   size={}    0x{:X}", idx, allocationSize[idx],
+        // std::println("alloc {}   size={}    0x{:X}", idx,
+        // allocationSize[idx],
         //             reinterpret_cast<std::size_t>(allocations[idx]));
         ASSERT_NE(allocations[idx], nullptr);
       } else {
-        //std::println("dealloc {}   size={}    0x{:X}", idx, allocationSize[idx],
+        // std::println("dealloc {}   size={}    0x{:X}", idx,
+        // allocationSize[idx],
         //             reinterpret_cast<std::size_t>(allocations[idx]));
         ASSERT_EQ(*reinterpret_cast<std::uint32_t *>(allocations[idx]), idx);
         resource.deallocate(allocations[idx], allocationSize[idx],
