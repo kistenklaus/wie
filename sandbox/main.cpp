@@ -1,11 +1,11 @@
-#include "memory/BuddyAllocator.hpp"
+#include "memory/BuddyResource.hpp"
 #include "memory/Mallocator.hpp"
 #include <print>
 
 int main() {
 
   constexpr std::size_t Capacity = 64;
-  strobe::BuddyAllocator<Capacity, 4> resource;
+  strobe::BuddyResource<Capacity, 4> resource;
 
   void* p = resource.allocate(4,4);
   void* q = resource.allocate(8,4);

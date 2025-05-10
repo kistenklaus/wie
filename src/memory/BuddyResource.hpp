@@ -13,7 +13,7 @@ namespace strobe {
 
 template <std::size_t Capacity, std::size_t BlockSize,
           typename UpstreamAllocator = PageAllocator>
-class BuddyAllocator {
+class BuddyResource {
   using UpstreamTraits = AllocatorTraits<UpstreamAllocator>;
   static_assert(std::has_single_bit(Capacity));
   static_assert(std::has_single_bit(BlockSize));
@@ -31,8 +31,8 @@ class BuddyAllocator {
   };
 
 public:
-  explicit BuddyAllocator(UpstreamAllocator upstream = {})
-      : m_upstream(std::move(upstream)) {
+  explicit BuddyResource(const UpstreamAllocator &upstream = {})
+      : m_upstream(upstream) {
     m_buffer = reinterpret_cast<std::byte *>(UpstreamTraits::allocate(
         m_upstream, Capacity, alignof(std::max_align_t)));
     for (FreelistNode &node : m_freelistStorage) {
@@ -44,19 +44,18 @@ public:
     }
     pushFreelist(0, &getFreelistNode(0, 0));
   }
-  ~BuddyAllocator() {
+  ~BuddyResource() {
     if (m_buffer != nullptr) {
       UpstreamTraits::deallocate(m_upstream, m_buffer, Capacity,
                                  alignof(std::max_align_t));
       m_buffer = nullptr;
     }
   }
-  BuddyAllocator(const BuddyAllocator &) = delete;
-  BuddyAllocator &operator=(const BuddyAllocator &) = delete;
-  BuddyAllocator(BuddyAllocator &&o) = delete;
+  BuddyResource(const BuddyResource &) = delete;
+  BuddyResource &operator=(const BuddyResource &) = delete;
+  BuddyResource(BuddyResource &&o) = delete;
 
-  BuddyAllocator &operator=(BuddyAllocator &&o) = delete;
-
+  BuddyResource &operator=(BuddyResource &&o) = delete;
 
   bool owns(const void *p) const {
     const auto *raw = static_cast<const std::byte *>(p);
@@ -88,20 +87,27 @@ public:
   }
 
 private:
-  static constexpr int floorLog2(const std::size_t n) { return std::bit_width(n) - 1; }
+  static constexpr int floorLog2(const std::size_t n) {
+    return std::bit_width(n) - 1;
+  }
 
   static std::size_t indexOffsetOfOrder(const int order) {
     return (1 << static_cast<std::size_t>(order)) - 1;
   }
-  static std::size_t rankOfNodeIndex(const std::size_t nodeIndex, const int order) {
+  static std::size_t rankOfNodeIndex(const std::size_t nodeIndex,
+                                     const int order) {
     const std::size_t offset = indexOffsetOfOrder(order);
     return nodeIndex - offset;
   }
-  static std::size_t leftChild(const std::size_t index) { return 2 * index + 1; }
+  static std::size_t leftChild(const std::size_t index) {
+    return 2 * index + 1;
+  }
   static std::size_t leftChildN(const std::size_t index, const std::size_t n) {
     return ((index + 1) << n) - 1;
   }
-  static std::size_t rightChild(const std::size_t index) { return 2 * index + 2; }
+  static std::size_t rightChild(const std::size_t index) {
+    return 2 * index + 2;
+  }
   static std::size_t parentOfIndex(const std::size_t index) {
     return (index - 1) / 2;
   }
@@ -134,11 +140,11 @@ private:
     return head;
   }
 
-  void eraseNodeFromFreelist(FreelistNode* node, int order) {
+  void eraseNodeFromFreelist(FreelistNode *node, int order) {
     if (node->prev == nullptr) {
       m_freelists[order] = nullptr;
     } else {
-      FreelistNode* prev = node->prev;
+      FreelistNode *prev = node->prev;
       prev->next = node->next;
       // TODO Maybe we don't have to cleanup non used nodes.
       node->next = nullptr;
@@ -147,7 +153,7 @@ private:
   }
 
   static FreelistNode *rightChildOfFreelistNode(FreelistNode *node,
-                                         const int order) {
+                                                const int order) {
     if (order == LogBlockCount - 1) {
       return node;
     }
@@ -231,8 +237,8 @@ private:
       index = index * 2 + 1;
       m_bitset.set(index);
       FreelistNode *right = rightChildOfFreelistNode(node, o);
-      //assert(right >= &m_freelistStorage.front());
-      //assert(right < &m_freelistStorage.back());
+      // assert(right >= &m_freelistStorage.front());
+      // assert(right < &m_freelistStorage.back());
       ++o;
       pushFreelist(o, right);
     }
@@ -241,7 +247,7 @@ private:
 
   void deallocateToFreelist(void *ptr, const int order) {
     std::size_t index = ptrToIndex(ptr, order);
-    //assert(m_bitset[index] == true);
+    // assert(m_bitset[index] == true);
 
     std::size_t o = order;
     while (index != 0) {
@@ -251,7 +257,7 @@ private:
         break;
       }
       // NOTE: Coalesce buddies
-      FreelistNode& node = getFreelistNode(buddy, o);
+      FreelistNode &node = getFreelistNode(buddy, o);
       eraseNodeFromFreelist(&node, o);
       index = parentOfIndex(index);
       --o;
@@ -259,7 +265,7 @@ private:
     if (index == 0) {
       m_bitset.reset(0);
     }
-    FreelistNode& node = getFreelistNode(index, o);
+    FreelistNode &node = getFreelistNode(index, o);
     pushFreelist(o, &node);
   }
 

@@ -6,6 +6,7 @@ namespace strobe {
 
 class Mallocator {
  public:
+   static constexpr bool is_always_equals = true;
   void* allocate(std::size_t size, std::size_t align) {
     return std::malloc(size);  // You could use aligned_alloc if necessary
   }

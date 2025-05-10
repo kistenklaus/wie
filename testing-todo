@@ -1,0 +1,37 @@
+- iterator contains_range(const Rg& range)
+- void erase(const_iterator)
+- add, but only with hashable and regular type.
+- remove, but only with hashable and regular type.
+- hashable, container which defines std::hash
+- Swappable with self.
+
+Sync testing
+- spsc
+- mpsc
+- thread safe priority queue!
+- thread safe set!
+- thread safe stack!
+
+
+Memory pattern.
+- Tiny stacksize (i.e. 64bit).
+- (Almost) minimal allocation size (never allocate more than required) (optionally we only care about the limit here within 1%)
+- ShrinkingContainer. Container which actually frees memory if it's no longer needed.
+  Never have more than 50% more memory allocated than what would be required. (Shrinking)
+- Power of 2 allocator (Container only allocates powers of 2 in bytes!)
+- Minimal high watermark Container (the high watermark allocation is never higher than what is actually required)
+- NoMemoryLeak (extra points if you don't leak memory i.e. after destruction).
+
+- Stable iterators (Iterators are never invalidated after moving or modifying the container).
+- Stable pointers (Pointers are never invalidated after moving or modifying the container).
+- CopyOnWrite (the container does not copy it's content until we write to it)
+
+Copy/Move Semantics.
+- SOO (The container does not allocate any memory for less than 3 elements, if each element is 8 byte large)
+- Shared Container, copying the container does not copy the underlying values. Possible even if the underlying 
+  type is non copyable.
+- Unique Container, moving the container does not move the underlying values. Possible even if the underlying 
+  type is non moveable.
+- Extra points if you actually call the destructor of values on remove or pop.
+
+
