@@ -9,6 +9,8 @@ enable_testing()
 
 add_executable(${TEST_NAME} 
   main.cpp
+  container/binary_heap.cpp
+  container/kary_heap.cpp
   container/competition/copyable.cpp
   container/competition/immutable.cpp
   container/competition/insertion.cpp
