@@ -559,7 +559,6 @@ private:
   }
   static void destructive_move_construct_from_helper(T *buffer, T *source,
                                                      size_type size) {
-    assert(m_capacity >= size);
     if constexpr (std::is_trivially_move_constructible_v<T>) {
       // Trivial objects can be copied with memcpy, which is most likely
       // faster!
