@@ -15,6 +15,7 @@ add_executable(${TEST_NAME}
   container/eager_segment_tree.cpp
   container/lazy_segment_tree.cpp
   container/bucket_queue.cpp
+  container/fenwick_tree.cpp
   container/competition/copyable.cpp
   container/competition/immutable.cpp
   container/competition/insertion.cpp

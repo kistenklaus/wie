@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cmath>
 #include <concepts>
-#include <fmt/printf.h>
 #include <functional>
 #include <iostream>
 #include <iterator>
