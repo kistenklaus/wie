@@ -1,6 +1,4 @@
 #include "memory/BuddyResource.hpp"
-#include "memory/Mallocator.hpp"
-#include <print>
 
 int main() {
 

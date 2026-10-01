@@ -1,5 +1,6 @@
 #include <bit>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
@@ -7,18 +8,22 @@
 #include <utility>
 
 template <typename T, typename Tag> struct DefaultApply {
-  T operator()(T const &value, size_t length, Tag const &tag) const {
-    return value + tag * length;
+  void operator()(T &value, size_t length, Tag const &tag) const {
+    value = value + tag * length;
   }
 };
 
+// NOTE: Requires Ts and Tags default constructors to represent identity
+// elements for the Combine, Compose operations!
+// Also requires Tag to be equality comparible.
 template <typename T, typename Tag = T, typename Combine = std::plus<T>,
           typename Compose = Combine, typename Apply = DefaultApply<T, Tag>>
   requires(std::is_default_constructible_v<T> &&
            std::is_default_constructible_v<Tag> &&
+           std::equality_comparable<Tag> &&
            std::is_invocable_r_v<T, Combine, T, T> &&
            std::is_invocable_r_v<Tag, Compose, Tag, Tag> &&
-           std::is_invocable_r_v<T, Apply, const T &, size_t, const Tag &>)
+           std::is_invocable_r_v<void, Apply, T &, size_t, const Tag &>)
 class LazySegmentTree {
 public:
   using size_type = size_t;
@@ -27,17 +32,17 @@ public:
 
 private:
   struct Node {
-    T value;
-    Tag lazy;
+    value_type value;
+    tag_type lazy;
   };
 
   struct UpdateFrame {
-    size_type idx, nl, nr;
-    bool after_children;
+    size_type idx, l, r;
+    bool visited;
   };
 
   struct QueryFrame {
-    size_type idx, nl, nr;
+    size_type idx, l, r;
   };
 
 public:
@@ -50,7 +55,7 @@ public:
     const size_type cap = std::bit_ceil(m_size);
     m_nodes = static_cast<Node *>(std::malloc((2 * cap - 1) * sizeof(Node)));
     for (size_type i = 0; i < 2 * cap - 1; ++i)
-      std::construct_at(&m_nodes[i], Node{T{}, Tag{}});
+      std::construct_at(&m_nodes[i], Node{value_type{}, tag_type{}});
   }
 
   template <typename It>
@@ -66,12 +71,14 @@ public:
     const size_type base = cap - 1;
 
     auto it = begin;
-    for (size_type i = 0; i < m_size; ++i)
+    for (size_type i = 0; i < m_size; ++i) {
       m_nodes[base + i].value = *it++;
+    }
 
-    for (ptrdiff_t i = base - 1; i >= 0; --i)
+    for (ptrdiff_t i = base - 1; i >= 0; --i) {
       m_nodes[i].value =
           m_combine(m_nodes[left(i)].value, m_nodes[right(i)].value);
+    }
   }
 
   ~LazySegmentTree() {
@@ -108,29 +115,33 @@ public:
     stack[sp++] = {0, 0, cap, false};
 
     while (sp) {
-      UpdateFrame f = stack[--sp];
-      size_type i = f.idx;
-      size_type nl = f.nl;
-      size_type nr = f.nr;
+      UpdateFrame frame = stack[--sp];
+      size_type i = frame.idx;
 
-      if (r <= nl || nr <= l)
-        continue;
-
-      Node &node = m_nodes[i];
-      if (l <= nl && nr <= r) {
-        node.value = m_apply(node.value, nr - nl, tag);
-        node.lazy = m_compose(node.lazy, tag);
+      if (r <= frame.l || frame.r <= l) {
+        // outside of update range.
         continue;
       }
 
-      if (!f.after_children) {
-        push_lazy(i, nl, nr);
-        f.after_children = true;
-        stack[sp++] = f; // re-push for post-child combine
-        size_type mid = nl + (nr - nl) / 2;
-        stack[sp++] = {right(i), mid, nr, false};
-        stack[sp++] = {left(i), nl, mid, false};
+      Node &node = m_nodes[i];
+      if (l <= frame.l && frame.r <= r) {
+        // fully contained.
+        m_apply(node.value, frame.r - frame.l, tag);
+        node.lazy = m_compose(node.lazy, tag);
+        continue;
+      }
+      // Partially inside of query range.
+
+      if (!frame.visited) {
+        // downward recusion
+        push_lazy(i, frame.l, frame.r);
+        frame.visited = true;
+        stack[sp++] = frame; // re-push for post-child combine
+        size_type mid = (frame.l + frame.r) / 2;
+        stack[sp++] = {right(i), mid, frame.r, false};
+        stack[sp++] = {left(i), frame.l, mid, false};
       } else {
+        // upward recursion.
         node.value = m_combine(m_nodes[left(i)].value, m_nodes[right(i)].value);
       }
     }
@@ -148,31 +159,68 @@ public:
     T acc{};
 
     while (sp) {
-      QueryFrame f = stack[--sp];
-      size_type i = f.idx;
-      size_type nl = f.nl;
-      size_type nr = f.nr;
+      QueryFrame frame = stack[--sp];
+      size_type i = frame.idx;
 
-      if (r <= nl || nr <= l)
+      if (r <= frame.l || frame.r <= l) {
+        // outside of query range
         continue;
+      }
+
       Node &node = m_nodes[i];
-      if (l <= nl && nr <= r) {
+      if (l <= frame.l && frame.r <= r) {
+        // fully inside of query range.
         acc = m_combine(acc, node.value);
         continue;
       }
 
-      push_lazy(i, nl, nr);
-      size_type mid = nl + (nr - nl) / 2;
-      stack[sp++] = {right(i), mid, nr};
-      stack[sp++] = {left(i), nl, mid};
+      // Partially inside of query range.
+      push_lazy(i, frame.l, frame.r);
+      size_type mid = (frame.l + frame.r) / 2;
+      stack[sp++] = {right(i), mid, frame.r};
+      stack[sp++] = {left(i), frame.l, mid};
     }
 
     return acc;
   }
 
+  void set(size_type i, const T &value) {
+    if (i >= m_size)
+      return;
+
+    const size_type cap = std::bit_ceil(m_size);
+    size_type node = 0, l = 0, r = cap;
+
+    // push all lazy values along the path to i.
+    while (r - l > 1) {
+      push_lazy(node, l, r);
+      size_type mid = (r + l) / 2;
+      if (i < mid) {
+        node = left(node);
+        r = mid;
+      } else {
+        node = right(node);
+        l = mid;
+      }
+    }
+
+    m_nodes[node].value = value;
+    m_nodes[node].lazy = Tag{};
+
+    // walk back up and recompute aggregates.
+    while (node > 0) {
+      node = parent(node);
+      m_nodes[node].value =
+          m_combine(m_nodes[left(node)].value, m_nodes[right(node)].value);
+    }
+  }
+
   size_type size() const noexcept { return m_size; }
 
 private:
+  static constexpr size_type parent(size_type i) noexcept {
+    return (i - 1) / 2;
+  }
   static constexpr size_type left(size_type i) noexcept { return 2 * i + 1; }
   static constexpr size_type right(size_type i) noexcept { return 2 * i + 2; }
 
@@ -189,7 +237,7 @@ private:
 
   void apply_to_node(size_type i, size_type nl, size_type nr, const Tag &tag) {
     Node &n = m_nodes[i];
-    n.value = m_apply(n.value, nr - nl, tag);
+    m_apply(n.value, nr - nl, tag);
     n.lazy = m_compose(n.lazy, tag);
   }
 
